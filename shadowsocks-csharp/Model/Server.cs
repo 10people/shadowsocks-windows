@@ -9,12 +9,22 @@ namespace Shadowsocks.Model
     [Serializable]
     public class Server
     {
+        public static readonly Regex
+            UrlFinder = new Regex("^ss://((?:[A-Za-z0-9+/]+)|((?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?))$",
+                                  RegexOptions.Compiled | RegexOptions.IgnoreCase),
+            DetailsParser = new Regex("^((?<method>.+?)(?<auth>-auth)??:(?<password>.*)@(?<hostname>.+?)" +
+                                      ":(?<port>\\d+?))$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+        private const int DefaultServerTimeoutSec = 5;
+        public const int MaxServerTimeoutSec = 20;
+
         public string server;
         public int server_port;
         public string password;
         public string method;
         public string remarks;
         public bool auth;
+        public int timeout;
 
         public override int GetHashCode()
         {
@@ -33,14 +43,24 @@ namespace Shadowsocks.Model
             {
                 return I18N.GetString("New server");
             }
-            if (remarks.IsNullOrEmpty())
-            {
-                return server + ":" + server_port;
+            string serverStr;
+            // CheckHostName() won't do a real DNS lookup
+            var hostType = Uri.CheckHostName( server );
+            if ( hostType == UriHostNameType.Unknown ) {
+                throw new FormatException("Invalid Server Address.");
             }
-            else
-            {
-                return remarks + " (" + server + ":" + server_port + ")";
+            switch ( hostType ) {
+                case UriHostNameType.IPv6:
+                    serverStr = $"[{server}]:{server_port}";
+                    break;
+                default:
+                    // IPv4 and domain name
+                    serverStr = $"{server}:{server_port}";
+                    break;
             }
+            return remarks.IsNullOrEmpty()
+                ? serverStr
+                : $"{remarks} ({serverStr})";
         }
 
         public Server()
@@ -51,49 +71,21 @@ namespace Shadowsocks.Model
             password = "";
             remarks = "";
             auth = false;
+            timeout = DefaultServerTimeoutSec;
         }
 
         public Server(string ssURL) : this()
         {
-            string[] r1 = Regex.Split(ssURL, "ss://", RegexOptions.IgnoreCase);
-            string base64 = r1[1].ToString();
-            byte[] bytes = null;
-            for (var i = 0; i < 3; i++)
-            {
-                try
-                {
-                    bytes = Convert.FromBase64String(base64);
-                }
-                catch (FormatException)
-                {
-                    base64 += "=";
-                }
-            }
-            if (bytes == null)
-            {
-                throw new FormatException();
-            }
-            try
-            {
-                string data = Encoding.UTF8.GetString(bytes);
-                int indexLastAt = data.LastIndexOf('@');
-
-                string afterAt = data.Substring(indexLastAt + 1);
-                int indexLastColon = afterAt.LastIndexOf(':');
-                server_port = int.Parse(afterAt.Substring(indexLastColon + 1));
-                server = afterAt.Substring(0, indexLastColon);
-
-                string beforeAt = data.Substring(0, indexLastAt);
-                string[] parts = beforeAt.Split(new[] { ':' });
-                method = parts[0];
-                password = parts[1];
-
-                //TODO: read one_time_auth
-            }
-            catch (IndexOutOfRangeException)
-            {
-                throw new FormatException();
-            }
+            var match = UrlFinder.Match(ssURL);
+            if (!match.Success) throw new FormatException();
+            var base64 = match.Groups[1].Value;
+            match = DetailsParser.Match(Encoding.UTF8.GetString(Convert.FromBase64String(
+                base64.PadRight(base64.Length + (4 - base64.Length % 4) % 4, '='))));
+            method = match.Groups["method"].Value;
+            auth = match.Groups["auth"].Success;
+            password = match.Groups["password"].Value;
+            server = match.Groups["hostname"].Value;
+            server_port = int.Parse(match.Groups["port"].Value);
         }
 
         public string Identifier()

@@ -42,13 +42,15 @@ namespace Shadowsocks.View
         {
             AddButton.Text = I18N.GetString("&Add");
             DeleteButton.Text = I18N.GetString("&Delete");
-            IPLabel.Text = I18N.GetString("Server IP");
+            DuplicateButton.Text = I18N.GetString("Dupli&cate");
+            IPLabel.Text = I18N.GetString("Server Addr");
             ServerPortLabel.Text = I18N.GetString("Server Port");
             PasswordLabel.Text = I18N.GetString("Password");
             EncryptionLabel.Text = I18N.GetString("Encryption");
             ProxyPortLabel.Text = I18N.GetString("Proxy Port");
             RemarksLabel.Text = I18N.GetString("Remarks");
-            OneTimeAuth.Text = I18N.GetString("Onetime Authentication (Experimental)");
+            TimeoutLabel.Text = I18N.GetString("Timeout(Sec)");
+            OneTimeAuth.Text = I18N.GetString("Onetime Authentication");
             ServerGroupBox.Text = I18N.GetString("Server");
             OKButton.Text = I18N.GetString("OK");
             MyCancelButton.Text = I18N.GetString("Cancel");
@@ -77,15 +79,32 @@ namespace Shadowsocks.View
                 {
                     return true;
                 }
-                Server server = new Server
+                Server server = new Server();
+                server.server = IPTextBox.Text.Trim();
+                try
                 {
-                    server = IPTextBox.Text.Trim(),
-                    server_port = int.Parse(ServerPortTextBox.Text),
-                    password = PasswordTextBox.Text,
-                    method = EncryptionSelect.Text,
-                    remarks = RemarksTextBox.Text,
-                    auth = OneTimeAuth.Checked
-                };
+                    server.server_port = int.Parse(ServerPortTextBox.Text);
+                }
+                catch (FormatException)
+                {
+                    MessageBox.Show(I18N.GetString("Illegal port number format"));
+                    ServerPortTextBox.Clear();
+                    return false;
+                }
+                server.password = PasswordTextBox.Text;
+                server.method = EncryptionSelect.Text;
+                server.remarks = RemarksTextBox.Text;
+                try
+                {
+                    server.timeout = int.Parse(TimeoutTextBox.Text);
+                }
+                catch (FormatException)
+                {
+                    MessageBox.Show(I18N.GetString("Illegal timeout format"));
+                    TimeoutTextBox.Clear();
+                    return false;
+                }
+                server.auth = OneTimeAuth.Checked;
                 int localPort = int.Parse(ProxyPortTextBox.Text);
                 Configuration.CheckServer(server);
                 Configuration.CheckLocalPort(localPort);
@@ -93,10 +112,6 @@ namespace Shadowsocks.View
                 _modifiedConfiguration.localPort = localPort;
 
                 return true;
-            }
-            catch (FormatException)
-            {
-                MessageBox.Show(I18N.GetString("Illegal port number format"));
             }
             catch (Exception ex)
             {
@@ -117,6 +132,7 @@ namespace Shadowsocks.View
                 ProxyPortTextBox.Text = _modifiedConfiguration.localPort.ToString();
                 EncryptionSelect.Text = server.method ?? "aes-256-cfb";
                 RemarksTextBox.Text = server.remarks;
+                TimeoutTextBox.Text = server.timeout.ToString();
                 OneTimeAuth.Checked = server.auth;
             }
         }
@@ -210,6 +226,20 @@ namespace Shadowsocks.View
             _lastSelectedIndex = ServersListBox.SelectedIndex;
         }
 
+        private void DuplicateButton_Click( object sender, EventArgs e )
+        {
+            if (!SaveOldSelectedServer())
+            {
+                return;
+            }
+            Server currServer = _modifiedConfiguration.configs[_lastSelectedIndex];
+            var currIndex = _modifiedConfiguration.configs.IndexOf( currServer );
+            _modifiedConfiguration.configs.Insert(currIndex + 1, currServer);
+            LoadConfiguration(_modifiedConfiguration);
+            ServersListBox.SelectedIndex = currIndex + 1;
+            _lastSelectedIndex = ServersListBox.SelectedIndex;
+        }
+
         private void DeleteButton_Click(object sender, EventArgs e)
         {
             _lastSelectedIndex = ServersListBox.SelectedIndex;
@@ -230,7 +260,6 @@ namespace Shadowsocks.View
 
         private void OKButton_Click(object sender, EventArgs e)
         {
-            Server server = controller.GetCurrentServer();
             if (!SaveOldSelectedServer())
             {
                 return;
@@ -241,7 +270,10 @@ namespace Shadowsocks.View
                 return;
             }
             controller.SaveServers(_modifiedConfiguration.configs, _modifiedConfiguration.localPort);
-            controller.SelectServerIndex(_modifiedConfiguration.configs.IndexOf(server));
+            // SelectedIndex remains valid
+            // We handled this in event handlers, e.g. Add/DeleteButton, SelectedIndexChanged
+            // and move operations
+            controller.SelectServerIndex(ServersListBox.SelectedIndex);
             this.Close();
         }
 
@@ -264,7 +296,7 @@ namespace Shadowsocks.View
         {
             int index = ServersListBox.SelectedIndex;
             Server server = _modifiedConfiguration.configs[index];
-            object item = ServersListBox.SelectedItem;
+            object item = ServersListBox.Items[index];
 
             _modifiedConfiguration.configs.Remove(server);
             _modifiedConfiguration.configs.Insert(index + step, server);
@@ -323,19 +355,6 @@ namespace Shadowsocks.View
             if (ServersListBox.SelectedIndex < ServersListBox.Items.Count - 1)
             {
                 MoveConfigItem(+1);  // +1 means move forward
-            }
-        }
-
-        private void EncryptionSelect_SelectedIndexChanged(object sender, EventArgs e)
-        {
-            if (EncryptionSelect.Text == "rc4" || EncryptionSelect.Text == "table")
-            {
-                OneTimeAuth.Enabled = false;
-                OneTimeAuth.Checked = false;
-            }
-            else
-            {
-                OneTimeAuth.Enabled = true;
             }
         }
     }

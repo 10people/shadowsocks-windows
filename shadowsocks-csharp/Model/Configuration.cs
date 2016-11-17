@@ -24,7 +24,10 @@ namespace Shadowsocks.Model
         public bool useOnlinePac;
         public bool availabilityStatistics;
         public bool autoCheckUpdate;
+        public bool isVerboseLogging;
         public LogViewerConfig logViewer;
+        public ProxyConfig proxy;
+        public HotkeyConfig hotkey;
 
         private static string CONFIG_FILE = "gui-config.json";
 
@@ -41,6 +44,7 @@ namespace Shadowsocks.Model
             CheckPort(server.server_port);
             CheckPassword(server.password);
             CheckServer(server.server);
+            CheckTimeout(server.timeout, Server.MaxServerTimeoutSec);
         }
 
         public static Configuration Load()
@@ -54,6 +58,15 @@ namespace Shadowsocks.Model
                     config.localPort = 1080;
                 if (config.index == -1 && config.strategy == null)
                     config.index = 0;
+                if (config.logViewer == null)
+                    config.logViewer = new LogViewerConfig();
+                if (config.proxy == null)
+                    config.proxy = new ProxyConfig();
+                if (config.hotkey == null)
+                    config.hotkey = new HotkeyConfig();
+
+                config.proxy.CheckConfig();
+
                 return config;
             }
             catch (Exception e)
@@ -94,7 +107,7 @@ namespace Shadowsocks.Model
             }
             catch (IOException e)
             {
-                Console.Error.WriteLine(e);
+                Logging.LogUsefulException(e);
             }
         }
 
@@ -128,10 +141,17 @@ namespace Shadowsocks.Model
                 throw new ArgumentException(I18N.GetString("Password can not be blank"));
         }
 
-        private static void CheckServer(string server)
+        public static void CheckServer(string server)
         {
             if (server.IsNullOrEmpty())
                 throw new ArgumentException(I18N.GetString("Server IP can not be blank"));
+        }
+
+        public static void CheckTimeout(int timeout, int maxTimeout)
+        {
+            if (timeout <= 0 || timeout > maxTimeout)
+                throw new ArgumentException(string.Format(
+                    I18N.GetString("Timeout is invalid, it should not exceed {0}"), maxTimeout));
         }
     }
 }

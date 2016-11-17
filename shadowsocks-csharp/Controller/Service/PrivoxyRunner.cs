@@ -1,27 +1,37 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Net;
 using System.Net.NetworkInformation;
 using System.Runtime.InteropServices;
 using System.Text;
-
+using System.Windows.Forms;
 using Shadowsocks.Model;
 using Shadowsocks.Properties;
 using Shadowsocks.Util;
+using Shadowsocks.Util.ProcessManagement;
 
 namespace Shadowsocks.Controller
 {
-    class PolipoRunner
+    class PrivoxyRunner
     {
+        private static int Uid;
+        private static string UniqueConfigFile;
+        private static Job PrivoxyJob;
         private Process _process;
         private int _runningPort;
 
-        static PolipoRunner()
+        static PrivoxyRunner()
         {
             try
             {
+                Uid = Application.StartupPath.GetHashCode(); // Currently we use ss's StartupPath to identify different Privoxy instance.
+                UniqueConfigFile = $"privoxy_{Uid}.conf";
+                PrivoxyJob = new Job();
+
                 FileManager.UncompressFile(Utils.GetTempPath("ss_privoxy.exe"), Resources.privoxy_exe);
                 FileManager.UncompressFile(Utils.GetTempPath("mgwz.dll"), Resources.mgwz_dll);
             }
@@ -44,40 +54,33 @@ namespace Shadowsocks.Controller
             Server server = configuration.GetCurrentServer();
             if (_process == null)
             {
-                Process[] existingPolipo = Process.GetProcessesByName("ss_privoxy");
-                foreach (Process p in existingPolipo)
+                Process[] existingPrivoxy = Process.GetProcessesByName("ss_privoxy");
+                foreach (Process p in existingPrivoxy.Where(IsChildProcess))
                 {
-                    try
-                    {
-                        p.CloseMainWindow();
-                        p.WaitForExit(100);
-                        if (!p.HasExited)
-                        {
-                            p.Kill();
-                            p.WaitForExit();
-                        }
-                    }
-                    catch (Exception e)
-                    {
-                        Logging.LogUsefulException(e);
-                    }
+                    KillProcess(p);
                 }
-                string polipoConfig = Resources.privoxy_conf;
+                string privoxyConfig = Resources.privoxy_conf;
                 _runningPort = this.GetFreePort();
-                polipoConfig = polipoConfig.Replace("__SOCKS_PORT__", configuration.localPort.ToString());
-                polipoConfig = polipoConfig.Replace("__POLIPO_BIND_PORT__", _runningPort.ToString());
-                polipoConfig = polipoConfig.Replace("__POLIPO_BIND_IP__", configuration.shareOverLan ? "0.0.0.0" : "127.0.0.1");
-                FileManager.ByteArrayToFile(Utils.GetTempPath("privoxy.conf"), Encoding.UTF8.GetBytes(polipoConfig));
+                privoxyConfig = privoxyConfig.Replace("__SOCKS_PORT__", configuration.localPort.ToString());
+                privoxyConfig = privoxyConfig.Replace("__PRIVOXY_BIND_PORT__", _runningPort.ToString());
+                privoxyConfig = privoxyConfig.Replace("__PRIVOXY_BIND_IP__", configuration.shareOverLan ? "0.0.0.0" : "127.0.0.1");
+                FileManager.ByteArrayToFile(Utils.GetTempPath(UniqueConfigFile), Encoding.UTF8.GetBytes(privoxyConfig));
 
                 _process = new Process();
                 // Configure the process using the StartInfo properties.
                 _process.StartInfo.FileName = "ss_privoxy.exe";
-                _process.StartInfo.Arguments = "privoxy.conf";
+                _process.StartInfo.Arguments = UniqueConfigFile;
                 _process.StartInfo.WorkingDirectory = Utils.GetTempPath();
                 _process.StartInfo.WindowStyle = ProcessWindowStyle.Hidden;
                 _process.StartInfo.UseShellExecute = true;
                 _process.StartInfo.CreateNoWindow = true;
                 _process.Start();
+
+                /*
+                 * Add this process to job obj associated with this ss process, so that
+                 * when ss exit unexpectedly, this process will be forced killed by system.
+                 */
+                PrivoxyJob.AddProcess(_process.Handle);
             }
             RefreshTrayArea();
         }
@@ -86,18 +89,70 @@ namespace Shadowsocks.Controller
         {
             if (_process != null)
             {
-                try
-                {
-                    _process.Kill();
-                    _process.WaitForExit();
-                }
-                catch (Exception e)
-                {
-                    Logging.LogUsefulException(e);
-                }
+                KillProcess(_process);
                 _process = null;
             }
             RefreshTrayArea();
+        }
+
+        private static void KillProcess(Process p)
+        {
+            try
+            {
+                p.CloseMainWindow();
+                p.WaitForExit(100);
+                if (!p.HasExited)
+                {
+                    p.Kill();
+                    p.WaitForExit();
+                }
+            }
+            catch (Exception e)
+            {
+                Logging.LogUsefulException(e);
+            }
+        }
+
+        /*
+         * We won't like to kill other ss instances' ss_privoxy.exe.
+         * This function will check whether the given process is created
+         * by this process by checking the module path or command line.
+         * 
+         * Since it's required to put ss in different dirs to run muti instances,
+         * different instance will create their unique "privoxy_UID.conf" where
+         * UID is hash of ss's location.
+         */
+
+        private static bool IsChildProcess(Process process)
+        {
+            try
+            {
+                if (Utils.IsPortableMode())
+                {
+                    /*
+                     * Under PortableMode, we could identify it by the path of ss_privoxy.exe.
+                     */
+                    var path = process.MainModule.FileName;
+
+                    return Utils.GetTempPath("ss_privoxy.exe").Equals(path);
+                }
+                else
+                {
+                    var cmd = process.GetCommandLine();
+
+                    return cmd.Contains(UniqueConfigFile);
+                }
+            }
+            catch (Exception ex)
+            {
+                /*
+                 * Sometimes Process.GetProcessesByName will return some processes that
+                 * are already dead, and that will cause exceptions here.
+                 * We could simply ignore those exceptions.
+                 */
+                Logging.LogUsefulException(ex);
+                return false;
+            }
         }
 
         private int GetFreePort()

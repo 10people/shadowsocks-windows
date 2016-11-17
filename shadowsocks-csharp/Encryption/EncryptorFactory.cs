@@ -1,7 +1,7 @@
-﻿
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Reflection;
+
 namespace Shadowsocks.Encryption
 {
     public static class EncryptorFactory
@@ -13,9 +13,9 @@ namespace Shadowsocks.Encryption
         static EncryptorFactory()
         {
             _registeredEncryptors = new Dictionary<string, Type>();
-            foreach (string method in PolarSSLEncryptor.SupportedCiphers())
+            foreach (string method in MbedTLSEncryptor.SupportedCiphers())
             {
-                _registeredEncryptors.Add(method, typeof(PolarSSLEncryptor));
+                _registeredEncryptors.Add(method, typeof(MbedTLSEncryptor));
             }
             foreach (string method in SodiumEncryptor.SupportedCiphers())
             {

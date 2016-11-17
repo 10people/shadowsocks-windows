@@ -30,9 +30,8 @@ namespace Shadowsocks.Controller
             int n;
 
             using(var fs = File.Create(fileName))
-            using (var input = new GZipStream(
-                new MemoryStream(content),
-                CompressionMode.Decompress, false))
+            using (var input = new GZipStream(new MemoryStream(content),
+                    CompressionMode.Decompress, false))
             {
                 while ((n = input.Read(buffer, 0, buffer.Length)) > 0)
                 {
@@ -40,6 +39,5 @@ namespace Shadowsocks.Controller
                 }
             }
         }
-
     }
 }
